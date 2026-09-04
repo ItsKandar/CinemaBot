@@ -6,7 +6,6 @@ __pycache__/
 *.py[cod]
 data/
 .env
-.env.example
 README.md
 Dockerfile
 compose.yaml

@@ -27,7 +27,7 @@ par une simple réaction.
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp .env.example .env   # puis remplir les variables
+# créer un fichier .env avec les variables ci-dessous
 .venv/bin/python bot.py
 ```
 
@@ -37,7 +37,7 @@ cp .env.example .env   # puis remplir les variables
 | --- | --- | --- |
 | `DISCORD_TOKEN` | oui | Token du bot ([portail développeur](https://discord.com/developers/applications)) |
 | `TMDB_API_KEY` | oui pour le cinéma | Clé API v3 **ou** token v4 TMDB ([réglages TMDB](https://www.themoviedb.org/settings/api)) |
-| `CINEMA_CHANNEL_ID` | non | Salon des séances (préremplie avec `1545391737806262322`) |
+| `CINEMA_CHANNEL_ID` | non | Salon des séances (`1545391737806262322`) |
 | `GUILD_ID` | non | ID du serveur : synchro instantanée des commandes slash (sinon global, jusqu'à 1 h) |
 | `TMDB_LANGUAGE` | non | Langue des données TMDB (`fr-FR` par défaut) |
 
@@ -52,7 +52,7 @@ cp .env.example .env   # puis remplir les variables
 # Docker
 
 ```sh
-cp .env.example .env   # puis remplir les variables
+# créer un fichier .env (cf. les variables d'environnement plus haut)
 docker compose up -d --build
 docker compose logs -f
 ```

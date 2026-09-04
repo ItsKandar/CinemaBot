@@ -42,7 +42,8 @@ class Settings:
         token = (os.getenv("DISCORD_TOKEN") or "").strip()
         if not token:
             raise ConfigError(
-                "DISCORD_TOKEN est vide. Copie .env.example vers .env et renseigne le token du bot."
+                "DISCORD_TOKEN est vide. Crée un fichier .env à la racine du projet "
+                "contenant DISCORD_TOKEN=<le token du bot>."
             )
         return cls(
             token=token,
