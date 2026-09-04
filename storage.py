@@ -51,6 +51,10 @@ class JsonStore:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fp:
                 json.dump(data, fp, ensure_ascii=False, indent=2)
+            # mkstemp crée en 0600 : illisible depuis l'hôte quand le fichier
+            # vit dans un volume de conteneur. Rien de secret ici, seulement
+            # des identifiants Discord.
+            os.chmod(tmp, 0o644)
             os.replace(tmp, self.path)
         except BaseException:
             os.unlink(tmp)

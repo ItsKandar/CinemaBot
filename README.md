@@ -60,13 +60,39 @@ docker compose logs -f
 - Le `.env` n'est **pas** copié dans l'image : les variables sont injectées au démarrage
   via `env_file`. Après modification du `.env`, un `docker compose up -d` suffit.
 - L'état (inscriptions, rôles-réaction) est conservé dans le volume nommé `coincoin-data`,
-  il survit aux `--build` et aux redémarrages. Pour le consulter :
-  `docker compose exec coincoin cat data/screenings.json`
+  il survit aux `--build` et aux redémarrages.
 - Le conteneur tourne sans privilèges (uid 10001) et redémarre automatiquement,
   sauf arrêt explicite. Fuseau `Europe/Paris`.
 
-Pour utiliser `./data` de l'hôte au lieu du volume nommé, voir le commentaire dans
-[compose.yaml](compose.yaml) (il faut aligner l'uid du conteneur sur le tien).
+## Consulter les données du conteneur
+
+Les JSON vivent dans le volume, pas dans `./data`. Trois façons d'y accéder :
+
+```sh
+# 1. depuis le conteneur en marche
+docker compose exec coincoin cat data/screenings.json
+
+# 2. en copiant le dossier sur l'hôte (marche même conteneur arrêté)
+docker cp coincoin:/app/data ./data-copie
+
+# 3. directement sur le disque, sans passer par docker (podman rootless)
+ls "$(podman volume inspect canardgaydiscord_coincoin-data --format '{{.Mountpoint}}')"
+```
+
+### Ou : avoir les fichiers directement dans `./data`
+
+Si tu préfères éditer les JSON dans ton éditeur, remplace dans [compose.yaml](compose.yaml)
+la ligne du volume par un bind mount et force l'utilisateur du conteneur :
+
+```yaml
+    user: "0:0"          # podman rootless : uid 0 dans le conteneur = ton compte sur l'hôte
+    volumes:
+      - ./data:/app/data
+```
+
+Sans le `user:`, le conteneur (uid 10001) n'a pas le droit d'écrire dans un dossier
+qui t'appartient et le bot plante à la première inscription (`PermissionError`).
+Avec **Docker** (pas podman) il faut mettre ton propre uid à la place : `user: "1000:1000"`.
 
 Sans compose :
 

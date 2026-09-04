@@ -9,8 +9,9 @@ services:
       # Inscriptions et rôles-réaction survivent aux redémarrages et aux rebuilds.
       # Volume nommé plutôt que bind mount : le conteneur tourne sans privilèges
       # (uid 10001) et n'aurait pas les droits d'écriture sur un dossier de l'hôte.
-      # Pour utiliser ./data à la place : remplace la ligne par `- ./data:/app/data`
-      # et ajoute `user: "${UID:-1000}:${GID:-1000}"` à ce service.
+      # Pour voir les JSON dans ./data à la place, remplacer cette ligne par
+      # `- ./data:/app/data` ET ajouter au service `user: "0:0"` en podman rootless
+      # (ou `user: "1000:1000"` avec docker). Détails dans le README.
       - coincoin-data:/app/data
     restart: unless-stopped
     stop_grace_period: 15s
