@@ -1,0 +1,145 @@
+# Coin coin
+Bot discord pour mon serveur :)
+
+# Objectifs
+
+## Rôles-réaction
+
+Permettre aux membres de s'attribuer eux-mêmes des rôles en réagissant à un message,
+et de les retirer en enlevant leur réaction.
+
+## Séances de cinéma
+
+Permettre aux admins d'organiser des sorties ciné auxquelles les membres s'inscrivent
+par une simple réaction.
+
+- **Création par un admin** : le bot recherche le film sur TMDB (par titre ou par identifiant),
+  puis publie l'annonce dans le salon cinéma (`1545391737806262322`).
+- **Cinéma** au choix parmi *Le Palais des Cerises* (par défaut), *Opéraims* et *Pathé Thillois*.
+- **Annonce** sous forme d'embed contenant le titre du film, son synopsis, son affiche,
+  le cinéma, la date et l'heure de la séance, et le nombre de places restantes
+  (le total étant fixé par l'admin).
+- **Inscriptions** gérées par le bot via les réactions : réagir inscrit, retirer sa réaction
+  désinscrit, et le compteur de places se met à jour à chaque fois.
+
+# Installation
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env   # puis remplir les variables
+.venv/bin/python bot.py
+```
+
+## Variables d'environnement (`.env`)
+
+| Variable | Obligatoire | Rôle |
+| --- | --- | --- |
+| `DISCORD_TOKEN` | oui | Token du bot ([portail développeur](https://discord.com/developers/applications)) |
+| `TMDB_API_KEY` | oui pour le cinéma | Clé API v3 **ou** token v4 TMDB ([réglages TMDB](https://www.themoviedb.org/settings/api)) |
+| `CINEMA_CHANNEL_ID` | non | Salon des séances (préremplie avec `1545391737806262322`) |
+| `GUILD_ID` | non | ID du serveur : synchro instantanée des commandes slash (sinon global, jusqu'à 1 h) |
+| `TMDB_LANGUAGE` | non | Langue des données TMDB (`fr-FR` par défaut) |
+
+## Configuration côté Discord
+
+- Portail développeur → Bot → activer **Server Members Intent** (nécessaire aux rôles-réaction).
+- Inviter le bot avec le scope `bot applications.commands` et les permissions :
+  gérer les rôles, voir les salons, envoyer des messages, intégrer des liens,
+  ajouter des réactions, gérer les messages, lire l'historique.
+- Le rôle du bot doit être **au-dessus** des rôles qu'il distribue.
+
+# Docker
+
+```sh
+cp .env.example .env   # puis remplir les variables
+docker compose up -d --build
+docker compose logs -f
+```
+
+- Le `.env` n'est **pas** copié dans l'image : les variables sont injectées au démarrage
+  via `env_file`. Après modification du `.env`, un `docker compose up -d` suffit.
+- L'état (inscriptions, rôles-réaction) est conservé dans le volume nommé `coincoin-data`,
+  il survit aux `--build` et aux redémarrages. Pour le consulter :
+  `docker compose exec coincoin cat data/screenings.json`
+- Le conteneur tourne sans privilèges (uid 10001) et redémarre automatiquement,
+  sauf arrêt explicite. Fuseau `Europe/Paris`.
+
+Pour utiliser `./data` de l'hôte au lieu du volume nommé, voir le commentaire dans
+[compose.yaml](compose.yaml) (il faut aligner l'uid du conteneur sur le tien).
+
+Sans compose :
+
+```sh
+docker build -t coincoin-bot .
+docker run -d --name coincoin --restart unless-stopped \
+  --env-file .env -v coincoin-data:/app/data coincoin-bot
+```
+
+## Podman
+
+Les mêmes fichiers fonctionnent avec podman en rootless, sans aucun privilège root.
+`podman compose` délègue à un provider externe qui a besoin du socket utilisateur ;
+il suffit de l'activer une fois :
+
+```sh
+systemctl --user enable --now podman.socket
+podman compose up -d
+podman logs -f coincoin
+```
+
+Ou directement, sans compose ni socket :
+
+```sh
+podman build -t coincoin-bot .
+podman run -d --name coincoin --restart unless-stopped \
+  --env-file .env -v coincoin-data:/app/data coincoin-bot
+```
+
+Les avertissements `PyNaCl is not installed, voice will NOT be supported` au démarrage
+sont normaux : le bot n'utilise pas le vocal.
+
+# Commandes
+
+## Rôles-réaction (permission « Gérer les rôles »)
+
+| Commande | Effet |
+| --- | --- |
+| `/rolereaction panneau titre texte [salon]` | Publie un message de rôles-réaction, dont la légende se met à jour automatiquement |
+| `/rolereaction ajouter message emoji role [salon]` | Associe un emoji à un rôle sur n'importe quel message (ID ou lien) |
+| `/rolereaction retirer message emoji [salon]` | Supprime une association |
+| `/rolereaction lister` | Liste la configuration du serveur |
+
+Réagir attribue le rôle, retirer la réaction le retire.
+
+## Séances de cinéma (permission « Gérer les événements »)
+
+| Commande | Effet |
+| --- | --- |
+| `/cinema seance film date heure places [lieu] [salon]` | Crée la séance et publie l'embed dans le salon cinéma |
+| `/cinema liste` | Séances à venir |
+| `/cinema participants message` | Liste des inscrits d'une séance |
+| `/cinema places message nombre` | Change le nombre total de places |
+| `/cinema annuler message [raison]` | Annule la séance et prévient les inscrits en MP |
+
+- `film` : autocomplétion TMDB en direct ; un identifiant TMDB ou un titre libre marchent aussi.
+- `date` : `JJ/MM/AAAA` (l'année est optionnelle) — `heure` : `20:30` ou `20h30`, fuseau Europe/Paris.
+- `lieu` : *Le Palais des Cerises* (défaut), *Opéraims* ou *Pathé Thillois* — liste modifiable
+  dans le dictionnaire `LIEUX` de [config.py](config.py).
+- L'embed affiche titre, synopsis, affiche, cinéma, date/heure, durée, genres,
+  places restantes et liste des inscrits.
+- Inscription en réagissant avec 🎟️, désinscription en retirant la réaction.
+  Si la séance est complète, la réaction est retirée et la personne prévenue en MP.
+
+# Structure
+
+```
+bot.py                    point d'entrée, chargement des cogs et synchro des commandes
+config.py                 .env, fuseau horaire, cinémas, emoji d'inscription
+storage.py                persistance JSON atomique
+tmdb.py                   client TMDB (recherche, détails, affiches)
+cogs/reaction_roles.py    rôles-réaction
+cogs/cinema.py            séances, embeds, inscriptions
+data/                     état persisté (reaction_roles.json, screenings.json)
+Dockerfile / compose.yaml conteneurisation
+```

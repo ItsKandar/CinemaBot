@@ -1,0 +1,24 @@
+services:
+  coincoin:
+    build: .
+    image: coincoin-bot
+    container_name: coincoin
+    # Les variables sont lues depuis .env, qui n'est jamais copié dans l'image.
+    env_file: .env
+    volumes:
+      # Inscriptions et rôles-réaction survivent aux redémarrages et aux rebuilds.
+      # Volume nommé plutôt que bind mount : le conteneur tourne sans privilèges
+      # (uid 10001) et n'aurait pas les droits d'écriture sur un dossier de l'hôte.
+      # Pour utiliser ./data à la place : remplace la ligne par `- ./data:/app/data`
+      # et ajoute `user: "${UID:-1000}:${GID:-1000}"` à ce service.
+      - coincoin-data:/app/data
+    restart: unless-stopped
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  coincoin-data:
