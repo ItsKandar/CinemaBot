@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -26,6 +27,7 @@ log = logging.getLogger("coincoin.cinema")
 COULEUR = discord.Colour.from_str("#e0668a")
 DATE_RE = re.compile(r"^(\d{1,2})[/\-.](\d{1,2})(?:[/\-.](\d{2,4}))?$")
 HEURE_RE = re.compile(r"^(\d{1,2})\s*[:hH]\s*(\d{2})?$")
+MENTION_RE = re.compile(r"^<@!?(\d+)>$")
 MAX_SYNOPSIS = 1000
 
 
@@ -57,6 +59,18 @@ def parse_datetime(date: str, heure: str) -> datetime:
         return datetime(annee, mois, jour, h, m, tzinfo=TIMEZONE)
     except ValueError as exc:
         raise ValueError(f"Date ou heure impossible : {exc}") from exc
+
+
+def _noms(membre: discord.Member) -> tuple[str, ...]:
+    return tuple(
+        nom.casefold()
+        for nom in (membre.name, membre.display_name, membre.global_name)
+        if nom
+    )
+
+
+def _correspond(membre: discord.Member, terme: str) -> bool:
+    return any(terme in nom for nom in _noms(membre))
 
 
 class Cinema(commands.GroupCog, name="cinema", description="Séances de cinéma du serveur"):
@@ -160,6 +174,56 @@ class Cinema(commands.GroupCog, name="cinema", description="Séances de cinéma 
             raise ValueError(f"Aucune séance connue pour le message `{reference}`.")
         return record
 
+    async def _search_members(self, guild: discord.Guild, terme: str) -> list[discord.Member]:
+        """Membres du cache, complétés par une requête à Discord si besoin."""
+        membres = [membre for membre in guild.members if not membre.bot]
+        if terme and not any(_correspond(membre, terme) for membre in membres):
+            try:
+                trouves = await guild.query_members(query=terme, limit=25)
+            except (discord.HTTPException, asyncio.TimeoutError):
+                trouves = []
+            membres += [membre for membre in trouves if not membre.bot and membre not in membres]
+        return membres
+
+    async def _resolve_member(self, guild: discord.Guild, brut: str) -> discord.Member:
+        """Retrouve un membre à partir d'un identifiant, d'une mention ou d'un pseudo."""
+        brut = brut.strip()
+        if not brut:
+            raise ValueError("Indique un pseudo ou un identifiant Discord.")
+
+        mention = MENTION_RE.match(brut)
+        identifiant = mention.group(1) if mention else (brut if brut.isdigit() else None)
+        if identifiant is not None:
+            membre = guild.get_member(int(identifiant))
+            if membre is None:
+                try:
+                    membre = await guild.fetch_member(int(identifiant))
+                except discord.NotFound:
+                    raise ValueError(f"Aucun membre `{identifiant}` sur ce serveur.") from None
+                except discord.HTTPException:
+                    raise ValueError(f"Impossible de récupérer le membre `{identifiant}`.") from None
+            return membre
+
+        terme = brut.lstrip("@").casefold()
+        membres = await self._search_members(guild, terme)
+        exacts = [membre for membre in membres if terme in _noms(membre)]
+        candidats = exacts or [
+            membre for membre in membres if any(terme in nom for nom in _noms(membre))
+        ]
+
+        if not candidats:
+            raise ValueError(
+                f"Aucun membre ne correspond à `{brut}`. Essaie avec son identifiant Discord."
+            )
+        if len(candidats) > 1:
+            apercu = ", ".join(f"{membre.display_name} (`{membre.id}`)" for membre in candidats[:5])
+            reste = "…" if len(candidats) > 5 else ""
+            raise ValueError(
+                f"Plusieurs membres correspondent à `{brut}` : {apercu}{reste}\n"
+                "Précise l'identifiant Discord."
+            )
+        return candidats[0]
+
     # --------------------------------------------------------- autocomplétion
 
     async def film_autocomplete(
@@ -173,6 +237,26 @@ class Cinema(commands.GroupCog, name="cinema", description="Séances de cinéma 
             return []
         return [
             app_commands.Choice(name=film.label[:100], value=f"tmdb:{film.id}") for film in films
+        ]
+
+    async def membre_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        guild = interaction.guild
+        if guild is None:
+            return []
+        terme = current.strip().lstrip("@").casefold()
+        membres = await self._search_members(guild, terme)
+        if terme:
+            membres = [
+                membre
+                for membre in membres
+                if _correspond(membre, terme) or terme in str(membre.id)
+            ]
+        membres.sort(key=lambda membre: membre.display_name.casefold())
+        return [
+            app_commands.Choice(name=f"{membre.display_name} (@{membre.name})"[:100], value=str(membre.id))
+            for membre in membres[:25]
         ]
 
     # --------------------------------------------------------------- commandes
@@ -317,6 +401,115 @@ class Cinema(commands.GroupCog, name="cinema", description="Séances de cinéma 
         )
         embed.set_footer(text=f"{len(inscrits)}/{record['places']} place(s) prise(s)")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="inscrire", description="Inscrire de force un membre à une séance")
+    @app_commands.describe(
+        message="Identifiant ou lien du message de la séance",
+        membre="Pseudo, mention ou identifiant Discord",
+    )
+    @app_commands.autocomplete(membre=membre_autocomplete)
+    @app_commands.checks.has_permissions(manage_events=True)
+    @app_commands.default_permissions(manage_events=True)
+    @app_commands.guild_only()
+    async def inscrire(self, interaction: discord.Interaction, message: str, membre: str) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            cible = await self._resolve_member(interaction.guild, membre)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        if cible.bot:
+            await interaction.followup.send("Les bots ne s'inscrivent pas aux séances.", ephemeral=True)
+            return
+
+        async with self.store.lock:
+            try:
+                record = await self._fetch_screening(interaction, message)
+            except ValueError as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            if record.get("annulee"):
+                await interaction.followup.send(
+                    "Cette séance est annulée : impossible d'y inscrire quelqu'un.", ephemeral=True
+                )
+                return
+            if cible.id in record["participants"]:
+                await interaction.followup.send(
+                    f"{cible.mention} est déjà inscrit à cette séance.", ephemeral=True
+                )
+                return
+            record["participants"].append(cible.id)
+            self.store.save()
+            surplus = len(record["participants"]) - record["places"]
+            await self._refresh(record)
+
+        movie = Movie.from_dict(record["movie"])
+        lien = (
+            f"https://discord.com/channels/{record['guild_id']}"
+            f"/{record['channel_id']}/{record['message_id']}"
+        )
+        # Le bot ne peut pas réagir à la place du membre : sans réaction sur le
+        # message, la désinscription passe forcément par /cinema desinscrire.
+        try:
+            await cible.send(
+                f"🎟️ {interaction.user.display_name} t'a inscrit·e à la séance "
+                f"**{movie.label}** : {lien}"
+            )
+            avis = ""
+        except discord.HTTPException:
+            avis = "\n(MP impossible : ses messages privés sont fermés.)"
+
+        avertissement = (
+            f"\n⚠️ La séance compte maintenant {len(record['participants'])} inscrit(s) "
+            f"pour {record['places']} place(s)."
+            if surplus > 0
+            else ""
+        )
+        await interaction.followup.send(
+            f"{cible.mention} est inscrit·e à **{movie.label}**.{avertissement}{avis}",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="desinscrire", description="Retirer un membre d'une séance")
+    @app_commands.describe(
+        message="Identifiant ou lien du message de la séance",
+        membre="Pseudo, mention ou identifiant Discord",
+    )
+    @app_commands.autocomplete(membre=membre_autocomplete)
+    @app_commands.checks.has_permissions(manage_events=True)
+    @app_commands.default_permissions(manage_events=True)
+    @app_commands.guild_only()
+    async def desinscrire(self, interaction: discord.Interaction, message: str, membre: str) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            cible = await self._resolve_member(interaction.guild, membre)
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+
+        async with self.store.lock:
+            try:
+                record = await self._fetch_screening(interaction, message)
+            except ValueError as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            if cible.id not in record["participants"]:
+                await interaction.followup.send(
+                    f"{cible.mention} n'est pas inscrit·e à cette séance.", ephemeral=True
+                )
+                return
+            record["participants"].remove(cible.id)
+            self.store.save()
+            await self._refresh(record)
+
+        # La réaction éventuelle doit partir aussi, sinon elle reste affichée
+        # sans inscription correspondante (et un re-clic ne changerait rien).
+        await self._remove_reaction(record, cible.id)
+
+        movie = Movie.from_dict(record["movie"])
+        await interaction.followup.send(
+            f"{cible.mention} a été retiré·e de **{movie.label}**.", ephemeral=True
+        )
 
     @app_commands.command(name="places", description="Modifier le nombre de places d'une séance")
     @app_commands.describe(

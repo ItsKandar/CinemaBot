@@ -145,6 +145,8 @@ Réagir attribue le rôle, retirer la réaction le retire.
 | `/cinema seance film date heure places [lieu] [salon]` | Crée la séance et publie l'embed dans le salon cinéma |
 | `/cinema liste` | Séances à venir |
 | `/cinema participants message` | Liste des inscrits d'une séance |
+| `/cinema inscrire message membre` | Inscrit de force un membre (pseudo, mention ou ID) |
+| `/cinema desinscrire message membre` | Retire un membre de la séance |
 | `/cinema places message nombre` | Change le nombre total de places |
 | `/cinema annuler message [raison]` | Annule la séance et prévient les inscrits en MP |
 
@@ -156,6 +158,12 @@ Réagir attribue le rôle, retirer la réaction le retire.
   places restantes et liste des inscrits.
 - Inscription en réagissant avec 🎟️, désinscription en retirant la réaction.
   Si la séance est complète, la réaction est retirée et la personne prévenue en MP.
+- `membre` : autocomplétion sur les membres du serveur ; un pseudo (nom d'utilisateur ou
+  surnom, insensible à la casse), une mention ou un identifiant Discord marchent aussi.
+  Si plusieurs pseudos correspondent, le bot demande l'identifiant.
+- `/cinema inscrire` passe outre le nombre de places (avec un avertissement) et prévient
+  la personne en MP ; le bot ne pouvant pas réagir à sa place, elle n'aura pas de réaction
+  sur l'annonce et c'est `/cinema desinscrire` qui la retire.
 
 # Structure
 
