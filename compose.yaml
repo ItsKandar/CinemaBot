@@ -13,7 +13,7 @@ services:
       # `- ./data:/app/data` ET ajouter au service `user: "0:0"` en podman rootless
       # (ou `user: "1000:1000"` avec docker). Détails dans le README.
       - coincoin-data:/app/data
-    restart: unless-stopped
+    restart: always
     stop_grace_period: 15s
     logging:
       driver: json-file
